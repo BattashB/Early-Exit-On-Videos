@@ -1,9 +1,5 @@
 import torch
 from torch import nn
-import models.EE_Resnext as ee_resnext3d
-import models.EE_Resnext_deformable as deform_ee_resnext3d
-import models.EE_Resnext_th as ee_resnext_th
-
 from models import  resnext, resnet
 
 
@@ -126,13 +122,15 @@ def generate_model(opt):
             model.load_state_dict(pretrain['state_dict'],strict=False)
             #The 1st loading loads entire model with ee trained on kinetics
             #The 2nd loading loads the backbone that trained on resnext101 kinetics+hmdb51
-            if opt.dataset == "hmdb51":
-                trained_hmdb51 = torch.load("/workspace/Early-Exit-In-Videos/pretrained_models/resnext-101-kinetics-hmdb51_split1.pth")
-                model.load_state_dict(trained_hmdb51['state_dict'],strict=False)
-            if opt.dataset == "ucf101":
-                trained_ucf101 = torch.load("/workspace/Early-Exit-In-Videos/pretrained_models/resnext-101-kinetics-ucf101_split1.pth")
-                model.load_state_dict(trained_ucf101['state_dict'],strict=False)
+            if opt.earlyexit_thresholds is not None:
+                if opt.dataset == "hmdb51":
+                    trained_hmdb51 = torch.load("/workspace/Early-Exit-In-Videos/pretrained_models/resnext-101-kinetics-hmdb51_split1.pth")
+                    model.load_state_dict(trained_hmdb51['state_dict'],strict=False)
+                if opt.dataset == "ucf101":
+                    trained_ucf101 = torch.load("/workspace/Early-Exit-In-Videos/pretrained_models/resnext-101-kinetics-ucf101_split1.pth")
+                    model.load_state_dict(trained_ucf101['state_dict'],strict=False)
 
+            
             #print(model.module.classifier.weight)
             freeze_backbone = False
             if freeze_backbone:
