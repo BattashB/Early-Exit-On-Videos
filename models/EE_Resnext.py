@@ -18,43 +18,6 @@ def conv3x3x3(in_planes, out_planes, stride=1):
         padding=1,
         bias=False)
 
-class MF_UNIT(nn.Module):
-
-    def __init__(self, in_channels, num_mid, out_channels, g=1, stride=(1,1,1)):
-        super(MF_UNIT, self).__init__()
-        
-        num_ix = int(num_mid/4)
-        # prepare input
-        self.conv_i1 =     Conv3dEE(in_channels=in_channels,  out_channels=num_ix,  kernel_size=(1,1,1), padding=(0,0,0))
-        self.conv_i2 =     Conv3dEE(in_channels=num_ix,  out_channels=in_channels,  kernel_size=(1,1,1), padding=(0,0,0))
-        self.conv_m1 =     Conv3dEE(in_channels=in_channels,  out_channels=num_mid, kernel_size=(3,3,3), padding=(1,1,1), stride=stride, g=g)
-        self.conv_m2 =     Conv3dEE(in_channels=num_mid, out_channels=out_channels, kernel_size=(1,3,3), padding=(0,1,1), g=g)
-        self.conv_w1 = Conv3dEE(in_channels=in_channels,  out_channels=out_channels, kernel_size=(1,1,1), padding=(0,0,0), stride=stride)
-
-
-    def forward(self, x):
-
-        h = self.conv_i1(x)
-        x_in = x + self.conv_i2(h)
-
-        h = self.conv_m1(x_in)
-        h = self.conv_m2(h)
-
-        x = self.conv_w1(x)
-
-        return h + x
-def downsample_basic_block(x, planes, stride):
-    out = F.avg_pool3d(x, kernel_size=1, stride=stride)
-    zero_pads = torch.Tensor(
-        out.size(0), planes - out.size(1), out.size(2), out.size(3),
-        out.size(4)).zero_()
-    if isinstance(out.data, torch.cuda.FloatTensor):
-        zero_pads = zero_pads.cuda()
-        
-
-    out = Variable(torch.cat([out.data, zero_pads], dim=1))
-
-    return out
 
 class Conv3dEE(nn.Module):
 
