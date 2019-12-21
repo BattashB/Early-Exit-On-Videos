@@ -20,9 +20,6 @@ from dataset import get_training_set, get_validation_set, get_test_set
 from utils import Logger
 from train import train_epoch
 from validation import val_epoch
-#from train_th import train_epoch_th
-from init_th import init_th_process
-
 import test 
 
 
@@ -68,12 +65,14 @@ if __name__ == '__main__':
    # print(model)
     pytorch_total_params = sum(p.numel() for p in model.parameters())
     trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
-    exit_params = sum(p.numel() for p in model.module.exit2.parameters())
     
+    if opt.earlyexit_thresholds is not None:  
+        exit_params = sum(p.numel() for p in model.module.exit2.parameters())
+        print("Added params:", exit_params)
     print("Num of params:", pytorch_total_params)
     print("Num of trainable params:", trainable)
-    print("Added params:", exit_params)
-    #################################################
+    
+#################################################
     
     criterion = nn.CrossEntropyLoss()
     if not opt.no_cuda:
