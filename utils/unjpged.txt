@@ -1,0 +1,61 @@
+
+ --counting_money
+ --deadlifting
+ --exercising_arm
+ --exercising_with_an_exercise_ball
+ --flying_kite
+ --folding_paper
+ --hopscotch
+ --opening_present
+ --playing_accordion
+ --playing_badminton
+ 
+ --playing_bagpipes
+ -playing_bass_guitar
+ -playing_cards
+ -playing_cello
+ -playing_chess
+ -playing_clarinet
+ -playing_cymbals
+ -playing_didgeridoo
+ -playing_drums
+ -playing_flute
+ -playing_guitar
+ -playing_harmonica
+ -playing_harp
+ -playing_keyboard
+ -playing_monopoly
+ -playing_organ
+ -playing_paintball
+ -playing_piano
+ -playing_poker
+ -playing_recorder
+ -playing_saxophone
+ -playing_trombone
+ -playing_trumpet
+ -playing_ukulele
+ -reading_book
+ -playing_violin
+ -playing_xylophone
+ -reading_newspaper
+ -recording_music
+ -riding_mechanical_bull
+ -ripping_paper
+ -rock_scissors_paper
+ -running_on_treadmill
+ -shredding_paper
+ -roller_skating
+ -shuffling_cards
+ -skateboarding
+ -skipping_rope
+ -strumming_guitar
+ - tapping_guitar
+
+ 
+ surfing_crowd
+ 
+ 
+ tossing_coin
+ using_segway
+ 
+ waiting_in_line
