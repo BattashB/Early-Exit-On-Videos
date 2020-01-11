@@ -19,6 +19,19 @@ def conv3x3x3(in_planes, out_planes, stride=1):
         bias=False)
 
 
+def downsample_basic_block(x, planes, stride):
+    out = F.avg_pool3d(x, kernel_size=1, stride=stride)
+    zero_pads = torch.Tensor(
+        out.size(0), planes - out.size(1), out.size(2), out.size(3),
+        out.size(4)).zero_()
+    if isinstance(out.data, torch.cuda.FloatTensor):
+        zero_pads = zero_pads.cuda()
+        
+
+    out = Variable(torch.cat([out.data, zero_pads], dim=1))
+
+    return out
+
 class Conv3dEE(nn.Module):
 
     def __init__(self, in_channels, out_channels,kernel_size=(3,3,3), padding=(1,1,1), stride=(1,1,1), g=1, bias=False):
@@ -33,131 +46,73 @@ class Conv3dEE(nn.Module):
         h = self.relu(self.bn(h))
         return h
 
-class EarlyExitBlockA(nn.Module):
-    def __init__(self, num_classes=51):
-        super(EarlyExitBlockA, self).__init__()
-        ksize=(3,3,3)
-        pad=(1,1,1)
-        nt_stride =(1,2,2)
-        stride = (2,2,2)
-        spatial_size  = 56
-        temporal_size = 8
-        self.conv1_exit0 = Conv3dEE(64, 128, kernel_size=ksize, stride=stride, padding=pad, bias=False)#(in_c,out_c)
-        self.conv2_exit0 = Conv3dEE(128, 256, kernel_size=ksize, stride=stride, padding=pad, bias=False)
-        
-        self.fc_exit0 = nn.Linear(256, num_classes)
-        self.local_avgpool = nn.AvgPool3d((2, 7, 7), stride=1)
-        for m in self.modules():
-            if isinstance(m, nn.Conv3d):
-                m.weight = nn.init.kaiming_normal_(m.weight, mode='fan_out', nonlinearity='relu')
-            elif isinstance(m, nn.BatchNorm3d):
-                m.weight.data.fill_(1)
-                m.bias.data.zero_()
-    def forward(self, x):
-        exit0 = self.conv1_exit0(x)
-        exit0 = self.conv2_exit0(exit0)
-        exit0 = self.local_avgpool(exit0)
-        exit0 = torch.squeeze(exit0)
-        exit0 = self.fc_exit0(exit0)
-        return exit0
+
 
 class EarlyExitBlockB(nn.Module):
-    def __init__(self, num_classes=51):
+    def __init__(self,block, layers, shortcut_type, cardinality,sample_size,frames_sequence,inplanes_block1,inplanes_block2, num_classes=51):
         super(EarlyExitBlockB, self).__init__()
         ksize=(3,3,3)
         pad=(1,1,1)
         nt_stride =(1,2,2)
         stride = (2,2,2)
-        self.conv1_exit1 = Conv3dEE(256, 128, kernel_size=ksize, stride=stride, padding=pad, bias=False)
-        self.conv2_exit1 = Conv3dEE(128, 256, kernel_size=ksize, stride=stride, padding=pad, bias=False)
-        self.fc_exit1 = nn.Linear(256, num_classes)
-
-        self.local_avgpool = nn.AvgPool3d((2, 7, 7), stride=1)
+        self.inplanes = inplanes_block1
+        self.block1 = self._make_layer(
+            block, 512, layers[2], shortcut_type, cardinality, stride=2)
+        self.inplanes = inplanes_block2
+        self.block2 = self._make_layer(
+            block, 1024, layers[3], shortcut_type, cardinality, stride=2)
+        last_duration = int(math.ceil(frames_sequence / 16))
+        last_size = int(math.ceil(sample_size / 32)) 
+        self.avgpool = nn.AvgPool3d(
+            (last_duration, last_size, last_size), stride=1)
+        #print("inside ResnextEE, number of classes:",num_classes)
+        self.fc = nn.Linear(cardinality * 32 * block.expansion, num_classes)
         for m in self.modules():
             if isinstance(m, nn.Conv3d):
                 m.weight = nn.init.kaiming_normal_(m.weight, mode='fan_out', nonlinearity='relu')
             elif isinstance(m, nn.BatchNorm3d):
                 m.weight.data.fill_(1)
                 m.bias.data.zero_()
+    def _make_layer(self,
+                    block,
+                    planes,
+                    blocks,
+                    shortcut_type,
+                    cardinality,
+                    stride=1):
+        downsample = None
+        
+        if shortcut_type == 'A':
+            downsample = partial(
+                    downsample_basic_block,
+                    planes=planes * block.expansion,
+                    stride=stride)
+        else:
+            downsample = nn.Sequential(
+                    nn.Conv3d(
+                        self.inplanes,
+                        planes * block.expansion,
+                        kernel_size=1,
+                        stride=stride,
+                        bias=False), nn.BatchNorm3d(planes * block.expansion))
+
+        layers = []
+        layers.append(
+            block(self.inplanes, planes, cardinality, stride, downsample))
+        self.inplanes = planes * block.expansion
+
+        return nn.Sequential(*layers)    
         
     def forward(self, x):
-        exit1 = self.conv1_exit1(x)
-        exit1 = self.conv2_exit1(exit1)
-        exit1 = self.local_avgpool(exit1)
+        exit1 = self.block1(x)
+        exit1 = self.block2(exit1)
+        exit1 = self.avgpool(exit1)
         exit1 = torch.squeeze(exit1)
-        exit1 = self.fc_exit1(exit1)
+        exit1 = self.fc(exit1)
         return exit1
         
- 
-"""class EarlyExitBlockC(nn.Module):
-    def __init__(self,fc_weights,fc_bias, num_classes):
-        super(EarlyExitBlockC, self).__init__()
-        ksize=(3,3,3)
-        pad=(1,1,1)
-        nt_stride =(1,2,2)
-        stride = (2,2,2)
-        no_stride =(1,1,1)
-        self.conv1_exit0 = MF_UNIT(512, 256,256,  stride=no_stride, g=32)
-        self.conv2_exit0 = MF_UNIT(256, 256,256,  stride=no_stride, g=32)
-        self.conv3_exit0 = MF_UNIT(256, 256,256,  stride=no_stride, g=32)
-        self.conv4_exit0 = MF_UNIT(256, 256,2048,  stride=stride, g=16)
-        #model.first_layer.weight.data
-        self.fc_exit0 = nn.Linear(2048, num_classes)
-        
-        if fc_weights != 0:
-            self.fc_exit0.weight.data = fc_weights
-            self.fc_exit0.bias.data = fc_bias
-
-        self.local_avgpool = nn.AvgPool3d((2, 7, 7), stride=1)
-        for m in self.modules():
-            if isinstance(m, nn.Conv3d):
-                m.weight = nn.init.kaiming_normal_(m.weight, mode='fan_out', nonlinearity='relu')
-            elif isinstance(m, nn.BatchNorm3d):
-                m.weight.data.fill_(1)
-                m.bias.data.zero_()
-        
-        
-    def forward(self, x):
-        exit0 = self.conv1_exit0(x)
-        exit0 = self.conv2_exit0(exit0)
-        exit0 = self.conv3_exit0(exit0)
-        exit0 = self.conv4_exit0(exit0)
-        exit0 = self.local_avgpool(exit0)
-        exit0 = torch.squeeze(exit0)
-        exit0 = self.fc_exit0(exit0)
-        return exit0
-"""     
-class EarlyExitBlockC_light_weight(nn.Module):
-    def __init__(self, num_classes):
-        super(EarlyExitBlockC_light_weight, self).__init__()
-        ksize=(3,3,3)
-        pad=(1,1,1)
-        nt_stride =(1,2,2)
-        stride = (2,2,2)
-        no_stride =(1,1,1)
-        self.conv1_exit0 = MF_UNIT(512, 256,256,  stride=no_stride, g=32)
-        self.conv4_exit0 = MF_UNIT(256, 256,2048,  stride=stride, g=16)
-        #model.first_layer.weight.data
-        self.fc_exit0 = nn.Linear(2048, num_classes)
-        
 
 
-        self.local_avgpool = nn.AvgPool3d((2, 7, 7), stride=1)
-        for m in self.modules():
-            if isinstance(m, nn.Conv3d):
-                m.weight = nn.init.kaiming_normal_(m.weight, mode='fan_out', nonlinearity='relu')
-            elif isinstance(m, nn.BatchNorm3d):
-                m.weight.data.fill_(1)
-                m.bias.data.zero_()
-        
-        
-    def forward(self, x):
-        exit0 = self.conv1_exit0(x)
-        exit0 = self.conv4_exit0(exit0)
-        exit0 = self.local_avgpool(exit0)
-        exit0 = torch.squeeze(exit0)
-        exit0 = self.fc_exit0(exit0)
-        return exit0
         
 class ResNeXtBottleneck(nn.Module):
     expansion = 2
@@ -235,9 +190,10 @@ class ResNextEE(nn.Module):
         
         self.layer2 = self._make_layer(
             block, 256, layers[1], shortcut_type, cardinality, stride=2)
-            
+        inplanes_block1 = self.inplanes     
         self.layer3 = self._make_layer(
             block, 512, layers[2], shortcut_type, cardinality, stride=2)
+        inplanes_block2 = self.inplanes         
         self.layer4 = self._make_layer(
             block, 1024, layers[3], shortcut_type, cardinality, stride=2)
         last_duration = int(math.ceil(frames_sequence / 16))
@@ -248,7 +204,7 @@ class ResNextEE(nn.Module):
         self.fc = nn.Linear(cardinality * 32 * block.expansion, num_classes)
 
 
-        self.exit2 = EarlyExitBlockC_light_weight(num_classes)
+        self.exit2 = EarlyExitBlockB(block, layers, shortcut_type, cardinality,sample_size,frames_sequence,inplanes_block1,inplanes_block2,num_classes)
         for m in self.modules():
             if isinstance(m, nn.Conv3d):
                 m.weight = nn.init.kaiming_normal_(m.weight, mode='fan_out', nonlinearity='relu')
@@ -290,6 +246,8 @@ class ResNextEE(nn.Module):
 
     def forward(self, x):
         output = []
+
+        
         x = self.conv1(x)
         x = self.bn1(x)
         x = self.relu(x)
@@ -305,7 +263,7 @@ class ResNextEE(nn.Module):
         #############################
         
         x = self.layer1(x)##in:(1,64,8,28,28)
-        
+
         ##########exit1##############
         """
         exit1 = self.exit1(x)
@@ -321,7 +279,7 @@ class ResNextEE(nn.Module):
         exit2 = self.exit2(x)
         if (len(exit2.shape) == 1):
             exit1 = torch.unsqueeze(exit2,0)
-        output.append(exit2)
+        output.append(exit2.view(1,exit2.shape[0]))
         #############################
         
         x = self.layer3(x)##in:(1,512,4,7,7)
@@ -334,6 +292,7 @@ class ResNextEE(nn.Module):
        
 
         output.append(x)
+        
         return output
 
 
@@ -384,14 +343,3 @@ def resnet152(**kwargs):
     """
     model = ResNeXt(ResNeXtBottleneck, [3, 8, 36, 3], **kwargs)
     return model
-
-if __name__ == "__main__":
-    import torch
-    #logging.getLogger().setLevel(logging.DEBUG)
-    # ---------
-    net = ResNextEE(ResNeXtBottleneck, [3, 4, 23, 3])
-    data = torch.autograd.Variable(torch.randn(1,3,16,112,112))
-    output = net(data)
-    torch.save({'state_dict': net.state_dict()}, './tmp.pth')
-    print(output.shape)
-
