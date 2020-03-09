@@ -15,7 +15,6 @@ def val_earlyexit_loss(output, target, opt):
     criterion = nn.CrossEntropyLoss(reduce=False)
     this_batch_size = target.size()[0]
     for exitnum in range(opt.num_exits - 1):
-
         
         current_loss = criterion(output[exitnum], target)
         if  not opt.evaluate_clip_level:
@@ -23,7 +22,10 @@ def val_earlyexit_loss(output, target, opt):
             loss += torch.sum(weighted_current_loss)/this_batch_size
             sum_lossweights += opt.earlyexit_lossweights[exitnum]
         opt.loss_exits[exitnum] = current_loss
-        
+    #print(exitnum,":::",output[exitnum].shape,target.shape)
+    #print(exitnum,":::",output[opt.num_exits - 1].shape)
+    
+    #out = output[opt.num_exits - 1].view(1,output[0].shape[-1])
     current_loss = criterion(output[opt.num_exits - 1], target)
     if  not opt.evaluate_clip_level:
         weighted_current_loss = ((1.0 - sum_lossweights) * current_loss)
@@ -77,6 +79,7 @@ def val_epoch(epoch, data_loader, model, criterion, opt, logger):
             exits_top1[i] = AverageMeter()
             exits_top5[i] = AverageMeter()
     end_time = time.time()
+    
     for batch, (inputs, targets) in enumerate(data_loader):
         temp_total_top1 = 0
         
@@ -89,12 +92,25 @@ def val_epoch(epoch, data_loader, model, criterion, opt, logger):
             inputs = Variable(inputs)
             targets = Variable(targets)
 
-        if "_th" in opt.model:
-            outputs,threshold = model(inputs)
-        else:
-            outputs = model(inputs)
+        out = model(inputs)
+
+        outputs = []
+        if isinstance(outputs, list):
+            outputs.append(out[0][-1])
+            if len(out) == 2:
+                if "selflearn" in opt.model:
+                    outputs.append(out[1][-1])
+                else:
+                    outputs.append(out[1])
+            elif len(out) == 3:    
+                outputs.append(out[1][-1])
+            try:
+                outputs.append(out[2][-1])
+            except:
+                pass
             
         if "ee_" in opt.model:
+            
             ####################calc loss + accuracies################
             loss,binary_taken = earlyexit_validate_loss(outputs, targets, criterion, opt)
 
@@ -119,6 +135,7 @@ def val_epoch(epoch, data_loader, model, criterion, opt, logger):
                 losses.update(loss.item(), inputs.size(0))
             total_top1.update(temp_total_top1, inputs.size(0))
             for i in range(opt.num_exits):
+                
                 exits_top1[i].update(acc_top_1[i], inputs.size(0))
                 exits_top5[i].update(acc_top_5[i], inputs.size(0))
             #######################################################
@@ -148,16 +165,16 @@ def val_epoch(epoch, data_loader, model, criterion, opt, logger):
             """
             top1_string = build_string(opt,'Top1','top_1')
             top5_string = build_string(opt,'Top5','top_5')
-
-            print('Epoch: [{0}][{1}/{2}]\t'.format(epoch,batch + 1,len(data_loader)), end =" ")
-            print('Total_top1 {acc_top.val:.4f} ({acc_top.avg:.4f})\t'.format(acc_top=total_top1), end =" ")
-           # if "_th" in opt.model:
-           #     print('Threshold : {0} \t'.format(threshold[0]), end=" ")
-           # print('Time {batch_time.val:.3f} ({batch_time.avg:.3f})\t'.format(batch_time=batch_time), end =" ")
-           # print('Data {data_time.val:.3f} ({data_time.avg:.3f})\t'.format(data_time=data_time), end =" ")
-            print('Loss {loss.val:.4f} ({loss.avg:.4f})\t'.format(loss=losses), end =" ")
-            print(top1_string.format(top_1 = exits_top1),end =" ")
-            print(top5_string.format(top_5 = exits_top5))
+            if ((batch + 1) % 10 == 0):
+                print('Epoch: [{0}][{1}/{2}]\t'.format(epoch,batch + 1,len(data_loader)), end =" ")
+                print('Total_top1 {acc_top.val:.4f} ({acc_top.avg:.4f})\t'.format(acc_top=total_top1), end =" ")
+               # if "_th" in opt.model:
+               #     print('Threshold : {0} \t'.format(threshold[0]), end=" ")
+               # print('Time {batch_time.val:.3f} ({batch_time.avg:.3f})\t'.format(batch_time=batch_time), end =" ")
+               # print('Data {data_time.val:.3f} ({data_time.avg:.3f})\t'.format(data_time=data_time), end =" ")
+                print('Loss {loss.val:.4f} ({loss.avg:.4f})\t'.format(loss=losses), end =" ")
+                print(top1_string.format(top_1 = exits_top1),end =" ")
+                print(top5_string.format(top_5 = exits_top5))
                 
         else:
             print('Epoch: [{0}][{1}/{2}]\t'

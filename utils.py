@@ -117,16 +117,15 @@ def calc_top5(outputs, targets,opt):
 
     return n_correct_elems / batch_size
 
-def probabily_accumolator(outputs, targets,video_name,probabily_dict):
+def probabily_accumolator(outputs, targets,video_name,probabily_dict,num_classes=51):
     batch_size = outputs.size(0)
-   
+    
     for i in range(batch_size):
         #_, pred = outputs[i].topk(1, 0, True)
-
+        
         if video_name[i] not in probabily_dict:
-            init_list = [0] * 51            
+            init_list = [0] * num_classes            
             probabily_dict[video_name[i]] = {'probabilities' : init_list,'target_label' : targets[i]}
-            
         outaslist = outputs[i].tolist()
         probabily_dict[video_name[i]]['probabilities'] = list( map(add, probabily_dict[video_name[i]]['probabilities'], outaslist) )
 
@@ -136,6 +135,8 @@ def probabily_accumolator(outputs, targets,video_name,probabily_dict):
 def ee_calculate_accuracy_video_level(outputs, targets,video_name,results_dict,binary_taken,opt):
     batch_size = outputs[0].size(0) #doesn't matter which exit
     #print("opt.num_exits:",opt.num_exits)
+    #opt.num_exits = 1
+
     for i in range(batch_size):
         for exit in range(opt.num_exits):
            # print("batch:",i)

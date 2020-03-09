@@ -13,7 +13,9 @@ def parse_opts():
         type=str,
         help='Path to weights, that we can take last the classifier from')
     
-
+    parser.add_argument('--exit1',default=False,type=bool)
+    parser.add_argument('--exit2',default=False,type=bool)        
+    parser.add_argument('--cheap',default=False,type=bool)
     parser.add_argument(
         '--finetune',
         action='store_true',
@@ -28,7 +30,7 @@ def parse_opts():
         help='Root directory path of data')
     parser.add_argument(
         '--video_path',
-        default='../VideoRecognition_v1/jpg',
+        default='/kinetics2/kinetics2/hmdb_jpg/',
         type=str,
         help='Directory path of Videos')
     parser.add_argument(
@@ -102,6 +104,9 @@ def parse_opts():
         help=
         'Spatial cropping method in training. random is uniform. corner is selection from 4 corners and 1 center.  (random | corner | center)'
     )
+    parser.add_argument('--e1_weights', type=str)
+    parser.add_argument('--e2_weights', type=str)
+
     parser.add_argument('--earlyexit_lossweights', type=float, nargs='*', dest='earlyexit_lossweights', default=None,
                     help='List of loss weights for early exits (e.g. --earlyexit_lossweights 0.1 0.3)')
     parser.add_argument('--earlyexit_thresholds', type=float, nargs='*', dest='earlyexit_thresholds', default=None,

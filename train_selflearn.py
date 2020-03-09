@@ -5,7 +5,8 @@ import os
 import sys
 import numpy as np
 from utils import AverageMeter, calc_top1, calc_top5,calculate_accuracy
-
+from torch.nn import functional as F
+from torch import nn
 def build_string(opt,prefix,var_name):
     string = prefix
     string = string + ' ['
@@ -28,46 +29,56 @@ def build_string(opt,prefix,var_name):
 def earlyexit_loss(output, target, criterion, opt):
     loss = 0
     sum_lossweights = 0
-    
+
     for exitnum in range(opt.num_exits - 1):
         #print("targets shape:",target.shape)
         #print("output shape:",output[0].shape)
-        if isinstance(output[exitnum],list):
-            out = output[exitnum][0]
-        else:
-            out = output[exitnum]
-        current_loss = (opt.earlyexit_lossweights[exitnum] * criterion(out, target))
+        current_loss = (opt.earlyexit_lossweights[exitnum] * criterion(output[exitnum], target))
         loss += current_loss
         sum_lossweights += opt.earlyexit_lossweights[exitnum]
         opt.loss_exits[exitnum] = current_loss
       #  opt.exiterrors[exitnum].add(output[exitnum].data, target)
-      
+    
     current_loss = (1.0 - sum_lossweights) * criterion(output[opt.num_exits - 1], target)
     loss += current_loss
     opt.loss_exits[exitnum] = current_loss
    # opt.exiterrors[opt.num_exits - 1].add(output[opt.num_exits - 1].data, target)
     return loss
 
-    
+def kl_loss(student_scores, teacher_scores):
+    student_scores = student_scores.view(student_scores.shape[0],-1)
+    teacher_scores = teacher_scores.view(teacher_scores.shape[0],-1)
+    student = F.softmax(student_scores,dim=1)
+    teacher = F.softmax(teacher_scores,dim=1)
+    kl = nn.KLDivLoss(reduction = 'batchmean')(student.log(),teacher)
+    return kl
 def ee_train_method(batch,epoch,opt,inputs,optimizer, outputs, targets,criterion,losses,end_time,batch_time,data_time,batch_logger,len_data_loader,exits_top1,exits_top5):        
-
+    
     acc_top_1 = [0] * opt.num_exits
     acc_top_5 = [0] * opt.num_exits
-    
-     
-
-
-
-    ####################calc loss + accuracies################
-    loss = earlyexit_loss(outputs, targets, criterion, opt)
+    midout = len(outputs[0]) 
+    #outputs = (exit1,exit2,(outlayer3,outlayer4,out))
+    loss = 0
+    if "selflearn" in opt.model:
+        for index in range(midout):
+            for exit_idx in range(opt.num_exits):
+                loss = loss + 0.1*kl_loss(outputs[exit_idx][index],outputs[-1][index])#+ 0.5 * nn.MSELoss()(outputs[exit_idx][index],outputs[-1][index])
+            
+        #print("index:",index," kl loss is:",loss)
+    for_ce = []
+    for_ce.append(outputs[0][-1])
+    for_ce.append(outputs[1][-1])   
+    try:    
+        for_ce.append(outputs[2][-1])
+    except:
+        pass
+    outputs = for_ce
+    ####################calc los    s + accuracies################
+    loss = loss + earlyexit_loss(outputs, targets, criterion, opt)
     
     for i in range(opt.num_exits):
-        if isinstance(outputs[i],list):
-            out = outputs[i][0]
-        else:
-            out = outputs[i]
-        acc_top_1[i],correct = calc_top1(out, targets,opt)
-        acc_top_5[i] = calc_top5(out, targets, opt)
+        acc_top_1[i],correct = calc_top1(outputs[i], targets,opt)
+        acc_top_5[i] = calc_top5(outputs[i], targets, opt)
     ############################################################
 
 
@@ -138,10 +149,8 @@ def train_epoch(epoch, data_loader, model, criterion, optimizer, opt,
             targets = targets.cuda()
             inputs = Variable(inputs).cuda() ##changed on 2.7.19 17:43
         targets = Variable(targets)
-        if "_th" in opt.model:
-            outputs,threshold = model(inputs)
-        else:
-            outputs = model(inputs)
+
+        outputs = model(inputs)
         #print("outputs.shape",outputs[0].shape)
         if "ee_" in opt.model:
             ee_train_method(batch,epoch,opt,inputs,optimizer, outputs, targets,criterion,losses,end_time,batch_time,data_time,batch_logger,len_data_loader,exits_top1,exits_top5)

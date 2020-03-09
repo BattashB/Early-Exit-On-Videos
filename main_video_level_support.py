@@ -63,11 +63,17 @@ if __name__ == '__main__':
         opt.exit0correctexit1no = 0
     ################################################
     
+    
 
     model, parameters = generate_model(opt)
+    
 
+    
+    
     #####How many parameters in the model############
    # print(model)
+    print ('Number of GPUs:', torch.cuda.device_count())
+
     pytorch_total_params = sum(p.numel() for p in model.parameters())
     trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
     print("num of params::", pytorch_total_params)

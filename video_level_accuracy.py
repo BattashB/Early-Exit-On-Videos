@@ -11,15 +11,20 @@ import math
 def val_earlyexit_loss(output, target, opt):
     loss = 0
     sum_lossweights = 0
-    criterion = nn.CrossEntropyLoss(reduce=False)
+    criterion = nn.CrossEntropyLoss(reduction ='none')
     this_batch_size = target.size()[0]
+
     for exitnum in range(opt.num_exits - 1):
-        current_loss = criterion(output[exitnum], target)
+        if len(output[exitnum].shape) == 1:
+            out = output[exitnum].view(1,output[exitnum].shape[0])
+        else: 
+            out = output[exitnum]
+        current_loss = criterion(out, target)
         weighted_current_loss = (opt.earlyexit_lossweights[exitnum] * current_loss)
         loss += torch.sum(weighted_current_loss) / this_batch_size
         sum_lossweights += opt.earlyexit_lossweights[exitnum]
         opt.loss_exits[exitnum] = current_loss
-
+    #
     current_loss = criterion(output[opt.num_exits - 1], target)
     weighted_current_loss = ((1.0 - sum_lossweights) * current_loss)
     loss += torch.sum(weighted_current_loss) / this_batch_size
@@ -35,10 +40,11 @@ def earlyexit_validate_loss(output, target, criterion, opt):
     binary_taken = []
     this_batch_size = target.size()[0]
     loss = val_earlyexit_loss(output, target, opt)  # updating  opt.loss_exits
+
     for batch_index in range(this_batch_size):
         earlyexit_taken = False
         # take the exit using CrossEntropyLoss as confidence measure (lower is more confident)
-        for exitnum in range(opt.num_exits - 1):
+        for exitnum in range(opt.num_exits-1):
             if opt.loss_exits[exitnum][batch_index] < opt.earlyexit_thresholds[exitnum]:
                 opt.exit_taken[exitnum] += 1
                 earlyexit_taken = True
@@ -76,7 +82,12 @@ def val_epoch(epoch, data_loader, model,opt,criterion):
     results_dict = {}
     probability_dict = {}
     #####################
-
+    predictions=0
+    exits={}
+    exits['0']     = 0
+    exits['final'] = 0
+    if opt.num_exits == 3:
+        exits['1']     = 0
     for batch, (inputs, targets,video_name) in enumerate(data_loader):
         temp_total_top1 = 0
         data_time.update(time.time() - end_time)
@@ -90,19 +101,34 @@ def val_epoch(epoch, data_loader, model,opt,criterion):
             targets = Variable(targets)
         
         
-        if opt.model == "ee_resnext_th":
-            outputs, threshold = model(inputs)
+        if opt.model == "ee_resnext_eval" or opt.model == "ee_resnext3d_eval_reuse":
+            outputs, num_exit = model(inputs)
+            predictions = predictions + 1
+            if opt.num_exits == 2:
+                if num_exit == 0:
+                    exits['0'] = exits['0'] + 1   
+                    outputs = outputs.view(1,opt.n_classes)
+                elif num_exit == 1:
+                    exits['final'] = exits['final'] + 1
+                
+            else:
+                if num_exit == 0:
+                    exits['0'] = exits['0'] + 1   
+                    outputs = outputs.view(1,opt.n_classes)
+                elif num_exit == 1:
+                    exits['1'] = exits['1'] + 1   
+                    outputs = outputs.view(1,opt.n_classes)
+                else:
+                    exits['final'] = exits['final'] + 1
+
         else:
             outputs = model(inputs)
-
-        if "ee_" in opt.model:
+        if  opt.model == "ee_resnext" :
             loss, binary_taken = earlyexit_validate_loss(outputs, targets, criterion, opt)
             ee_calculate_accuracy_video_level(outputs, targets, video_name,results_dict,binary_taken,opt)
         else:
-            probabily_accumolator(outputs, targets, video_name,probability_dict)
+            probabily_accumolator(outputs, targets, video_name,probability_dict,num_classes=opt.n_classes)
             calculate_accuracy_video_level(outputs, targets, video_name,results_dict)
-
-       
         batch_time.update(time.time() - end_time)
         end_time = time.time()
    # print(probability_dict)
@@ -121,7 +147,13 @@ def val_epoch(epoch, data_loader, model,opt,criterion):
         else:   
             final_result_list.append(0)
     video_acc = sum(final_result_list) / len(final_result_list)
-    print("Top1 (accumolating clip level scores) is:",video_acc*100,"%")
+    if opt.num_exits == 2:
+        print("Toatal number of predictions:",predictions,"earlyexit taken:",exits['0']," times")
+        print("Top1 (accumolating clip level scores) is:",video_acc*100,"%")
+    else:
+        print("Toatal number of predictions:",predictions,"First earlyexit taken:",exits['0']," times","Second earlyexit taken:",exits['1']," times")
+        print("Top1 (accumolating clip level scores) is:",video_acc*100,"%")
+
     
     avg_list = []
     for (video, values) in results_dict.items():

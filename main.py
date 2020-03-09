@@ -19,7 +19,11 @@ from target_transforms import Compose as TargetCompose
 from dataset import get_training_set, get_validation_set, get_test_set
 from utils import Logger
 from train import train_epoch
+from train_selflearn import train_epoch as train_epoch_selflearn
+
 from validation import val_epoch
+
+
 import test 
 
 
@@ -48,7 +52,7 @@ if __name__ == '__main__':
 
     ######################early exit add############
     if opt.earlyexit_thresholds:
-        opt.num_exits = len(opt.earlyexit_thresholds) + 1
+        opt.num_exits = len(opt.earlyexit_lossweights) + 1
         opt.loss_exits = [0] * opt.num_exits
         opt.exit_taken = [0] * opt.num_exits
         opt.true_positive = [0] * opt.num_exits
@@ -60,19 +64,23 @@ if __name__ == '__main__':
     
 
     model, parameters = generate_model(opt)
-
+    
     #####How many parameters in the model############
    # print(model)
     pytorch_total_params = sum(p.numel() for p in model.parameters())
     trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
-    
-    if opt.earlyexit_thresholds is not None:  
-        exit_params = sum(p.numel() for p in model.module.exit2.parameters())
-        print("Added params:", exit_params)
     print("Num of params:", pytorch_total_params)
     print("Num of trainable params:", trainable)
+    if opt.earlyexit_thresholds:
+        exit_params = 0
+        if opt.exit1:
+            exit_params = exit_params + sum(p.numel() for p in model.module.exit1.parameters())
+        if opt.exit2:
+            exit_params = exit_params + sum(p.numel() for p in model.module.exit2.parameters())
+        print("Added params:", exit_params)
     
-#################################################
+    
+    #################################################
     
     criterion = nn.CrossEntropyLoss()
     if not opt.no_cuda:
@@ -150,6 +158,8 @@ if __name__ == '__main__':
             num_workers=opt.n_threads,
             pin_memory=True,
             drop_last=True)
+            
+
         val_logger = Logger(
             os.path.join(opt.result_path, 'val.log'), ['epoch', 'loss', 'acc'])
 
@@ -168,15 +178,16 @@ if __name__ == '__main__':
             init_th_process(i, train_loader, model,th_loss , optimizer, opt,train_logger, train_batch_logger)
     for i in range(opt.begin_epoch, opt.n_epochs + 1):
         if not opt.no_train:
-            train_epoch(i, train_loader, model, criterion, optimizer, opt,
+            if  "selflearn" in opt.model :
+                train_epoch_selflearn(i, train_loader, model, criterion, optimizer, opt,
+                        train_logger, train_batch_logger)
+            else:
+                train_epoch(i, train_loader, model, criterion, optimizer, opt,
                         train_logger, train_batch_logger)
         if not opt.no_val:
             validation_loss = val_epoch(i, val_loader, model, criterion, opt,
                                         val_logger)
-        #if  "_th" in opt.model  and i % 5 == 0 and not opt.no_val:
-        #    train_epoch_th(i, train_loader, model, criterion, optimizer, opt,
-        #                train_logger, train_batch_logger)
-                                      
+                  
         if not opt.no_train and not opt.no_val:
             scheduler.step(validation_loss)
             

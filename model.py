@@ -1,11 +1,16 @@
 import torch
 from torch import nn
+import models.EE_Resnext as ee_resnext3d
+import models.EE_Resnext_eval as ee_resnext3d_eval
+import models.EE_Resnext_selflearn as ee_resnext3d_selflearn
+import models.EE_Resnext_selflearn_reuse as ee_resnext3d_selflearn_reuse
+import models.EE_Resnext_eval_reuse as ee_resnext3d_eval_reuse
 from models import  resnext, resnet
 
 
 def generate_model(opt):
     assert opt.model in [
-        'resnext', 'ee_resnext','resnet','ee_resnext_th'
+        'resnext', 'ee_resnext', 'ee_resnext_eval','resnet','ee_resnext_th','ee_resnext_selflearn','ee_resnext_selflearn_reuse','ee_resnext3d_eval_reuse'
     ]
 
     if opt.pretrain_path:    
@@ -17,8 +22,10 @@ def generate_model(opt):
             del[pretrain['state_dict']['module.fc.bias']]
             if "ee_" in opt.model:
                 del[pretrain['state_dict']['module.exit2.fc_exit0.weight']]
-                del[pretrain['state_dict']['module.exit2.fc_exit0.bias']]
-    
+                del[pretrain['state_dict']['module.exit2.fc_exit0.bias']]    
+                #del[pretrain['state_dict']['module.exit1.fc_exit0.weight']]
+                #del[pretrain['state_dict']['module.exit1.fc_exit0.bias']]
+
     if opt.model == 'resnet':
         assert opt.model_depth in [18, 34, 50, 101]
 
@@ -78,28 +85,43 @@ def generate_model(opt):
     elif opt.model == 'ee_resnext':
         print("model file, number of classes:",opt.n_classes)
         from models.EE_Resnext import get_fine_tuning_parameters
-        if opt.deformable:
-            print ("launching deform_ee_resnext") 
-            model = deform_ee_resnext3d.resnext101(
+        model = ee_resnext3d.resnext101(
                 opt,
                 num_classes=opt.n_classes,
                 frame_size=opt.frame_size,
                 frames_sequence=opt.frames_sequence)
-        elif opt.model_depth == 101:
-            model = ee_resnext3d.resnext101(
+    elif opt.model == 'ee_resnext_selflearn':
+        print("model file, number of classes:",opt.n_classes)
+        from models.EE_Resnext_selflearn import get_fine_tuning_parameters
+        model = ee_resnext3d_selflearn.resnext101(
+                opt,
+                num_classes=opt.n_classes,
+                frame_size=opt.frame_size,
+                frames_sequence=opt.frames_sequence)
+    elif opt.model == 'ee_resnext3d_eval_reuse':
+        from models.EE_Resnext_selflearn_reuse import get_fine_tuning_parameters
+        model = ee_resnext3d_eval_reuse.resnext101(
+                opt,
+                num_classes=opt.n_classes,
+                frame_size=opt.frame_size,
+                frames_sequence=opt.frames_sequence)
+    elif opt.model == 'ee_resnext_selflearn_reuse':
+        from models.EE_Resnext_selflearn_reuse import get_fine_tuning_parameters
+        model = ee_resnext3d_selflearn_reuse.resnext101(
+                opt,
+                num_classes=opt.n_classes,
+                frame_size=opt.frame_size,
+                frames_sequence=opt.frames_sequence)
+    elif opt.model == 'ee_resnext_eval':
+        print("model file, number of classes:",opt.n_classes)
+        from models.EE_Resnext_eval import get_fine_tuning_parameters
+        model = ee_resnext3d_eval.resnext101(
                 opt,
                 num_classes=opt.n_classes,
                 frame_size=opt.frame_size,
                 frames_sequence=opt.frames_sequence)
 
-    elif opt.model == 'ee_resnext_th':
-        from models.resnext import get_fine_tuning_parameters
-        if opt.model_depth == 101:
-            model = ee_resnext_th.resnext101(0,0,
-                num_classes=opt.n_classes,
-                # shortcut_type='B',
-                frame_size=opt.frame_size,
-                frames_sequence=opt.frames_sequence)   
+ 
                 
     if not opt.no_cuda:
         model = model.cuda()
@@ -124,21 +146,33 @@ def generate_model(opt):
             #The 2nd loading loads the backbone that trained on resnext101 kinetics+hmdb51
             if opt.earlyexit_thresholds is not None:
                 if opt.dataset == "hmdb51":
-                    trained_hmdb51 = torch.load("/workspace/Early-Exit-In-Videos/pretrained_models/resnext-101-kinetics-hmdb51_split1.pth")
+                    
+                    trained_hmdb51 = torch.load("resnext-101-kinetics-hmdb51_split1.pth")
+                   # for k,v in trained_hmdb51['state_dict'].items():
+                        
+                   #     print(k,"-",v.shape)
+                   # stop
                     model.load_state_dict(trained_hmdb51['state_dict'],strict=False)
                 if opt.dataset == "ucf101":
-                    trained_ucf101 = torch.load("/workspace/Early-Exit-In-Videos/pretrained_models/resnext-101-kinetics-ucf101_split1.pth")
+                    trained_ucf101 = torch.load("resnext-101-kinetics-ucf101_split1.pth")
                     model.load_state_dict(trained_ucf101['state_dict'],strict=False)
 
-            
             #print(model.module.classifier.weight)
-            freeze_backbone = False
+            freeze_backbone = True
             if freeze_backbone:
                 for p in model.parameters():
                     p.requires_grad = False
-                for p in model.module.exit2.parameters():
-                    p.requires_grad = True
-
+                try:    
+                    for p in model.module.exit1.parameters():
+                        p.requires_grad = True
+                except:
+                    pass
+                try:
+                    for p in model.module.exit2.parameters():                
+                        p.requires_grad = True
+                except:
+                    pass
+                
             parameters = get_fine_tuning_parameters(model, opt.ft_begin_index)
             
             return model, parameters
