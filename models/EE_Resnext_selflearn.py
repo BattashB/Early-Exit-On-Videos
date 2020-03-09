@@ -4,7 +4,7 @@ import torch.nn.functional as F
 from torch.autograd import Variable
 import math
 from functools import partial
-from .exit_blocks import EarlyExitBlockA,EarlyExitBlockB,EarlyExitBlockLR_E1,EarlyExitBlockLR_E2
+from .exit_blocks import EarlyExitBlockA,EarlyExitBlockB, EarlyExitBlockBS,EarlyExitBlockBS_LR_E2,EarlyExitBlockBS_LR_E1
 __all__ = ['ResNeXt', 'resnet50', 'resnet101']
 
 
@@ -40,7 +40,6 @@ class Conv3dEE(nn.Module):
         self.relu = nn.ReLU(inplace=True)
         self.conv = nn.Conv3d(in_channels, out_channels, kernel_size=kernel_size, padding=padding,
                                stride=stride, groups=g, bias=bias)
-
     def forward(self, x):
         h = self.conv(x)
         h = self.relu(self.bn(h))
@@ -80,17 +79,14 @@ class ResNeXtBottleneck(nn.Module):
         out = self.conv1(x)
         out = self.bn1(out)
         out = self.relu(out)
-
         out = self.conv2(out)
         out = self.bn2(out)
         out = self.relu(out)
-
         out = self.conv3(out)
         out = self.bn3(out)
 
         if self.downsample is not None:
             residual = self.downsample(x)
-
         out += residual
         out = self.relu(out)
 
@@ -137,13 +133,17 @@ class ResNextEE(nn.Module):
             (last_duration, last_size, last_size), stride=1)
         #print("inside ResnextEE, number of classes:",num_classes)
         self.fc = nn.Linear(cardinality * 32 * block.expansion, num_classes)
+
+        #self.exit1 = EarlyExitBlockA(block, layers, shortcut_type, cardinality,sample_size,frames_sequence,inplanes_block1,inplanes_block2,num_classes)   
+        #self.exit2 = EarlyExitBlockBS(block, layers, shortcut_type, cardinality,sample_size,frames_sequence,inplanes_block1,inplanes_block2,num_classes)
         self.exit2_bool = opt.exit2
         self.exit1_bool = opt.exit1
+        if self.exit1_bool:
+            self.exit1 = EarlyExitBlockBS_LR_E1(block, layers, shortcut_type, cardinality,sample_size,frames_sequence,inplanes_block1,inplanes_block2,num_classes)
         
-        if opt.exit1:       
-            self.exit1 = EarlyExitBlockLR_E1(block, layers, shortcut_type, cardinality,sample_size,frames_sequence,inplanes_block1,inplanes_block2,num_classes)   
-        elif opt.exit2:
-            self.exit2 = EarlyExitBlockLR_E2(block, layers, shortcut_type, cardinality,sample_size,frames_sequence,inplanes_block1,inplanes_block2,num_classes)
+        if self.exit2_bool:
+            self.exit2 = EarlyExitBlockBS_LR_E2(block, layers, shortcut_type, cardinality,sample_size,frames_sequence,inplanes_block1,inplanes_block2,num_classes)
+        
         for m in self.modules():
             if isinstance(m, nn.Conv3d):
                 m.weight = nn.init.kaiming_normal_(m.weight, mode='fan_out', nonlinearity='relu')
@@ -185,6 +185,7 @@ class ResNextEE(nn.Module):
 
     def forward(self, x):
         output = []
+        midout = []
         x = self.conv1(x)
         x = self.bn1(x)
         x = self.relu(x)
@@ -203,7 +204,6 @@ class ResNextEE(nn.Module):
         if self.exit1_bool:
             exit1 = self.exit1(x)
             output.append(exit1)
- 
         #############################"""
 
         x = self.layer2(x)#in:(1,256,8,14,14)
@@ -212,18 +212,21 @@ class ResNextEE(nn.Module):
         if self.exit2_bool:
             exit2 = self.exit2(x)
             output.append(exit2)
+#            print("len of output now is:")
         #"""
         #############################
         
         x = self.layer3(x)##in:(1,512,4,7,7)
+        midout.append(x)
         x = self.layer4(x)
+        midout.append(x)
         x = self.avgpool(x)
 
         x = x.view(x.size(0), -1)
         x = self.fc(x)
         
-
-        output.append(x)
+        midout.append(x)
+        output.append(midout)
         
         return output
 
@@ -238,7 +241,7 @@ def get_fine_tuning_parameters(model, ft_begin_index):
     for i in range(ft_begin_index, 5):
         ft_module_names.append('layer{}'.format(i))
     ft_module_names.append('fc')
-
+    print("ft_module_names:",ft_module_names)
     parameters = []
     for k, v in model.named_parameters():
         #print("those are k,v:",k,v.shape)

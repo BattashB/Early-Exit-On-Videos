@@ -4,7 +4,8 @@ import torch.nn.functional as F
 from torch.autograd import Variable
 import math
 from functools import partial
-from .exit_blocks import EarlyExitBlockA,EarlyExitBlockB,EarlyExitBlockLR_E1,EarlyExitBlockLR_E2
+from .exit_blocks import EarlyExitBlockA,EarlyExitBlockB,EarlyExitBlockBS_LR_E1,EarlyExitBlockBS_LR_E2
+import time
 __all__ = ['ResNeXt', 'resnet50', 'resnet101']
 
 
@@ -48,7 +49,7 @@ class Conv3dEE(nn.Module):
 
 
 
-
+        
 class ResNeXtBottleneck(nn.Module):
     expansion = 2
 
@@ -137,13 +138,34 @@ class ResNextEE(nn.Module):
             (last_duration, last_size, last_size), stride=1)
         #print("inside ResnextEE, number of classes:",num_classes)
         self.fc = nn.Linear(cardinality * 32 * block.expansion, num_classes)
+
+        self.th = opt.earlyexit_thresholds
+        #self.exit1 = EarlyExitBlockA(block, layers, shortcut_type, cardinality,sample_size,frames_sequence,inplanes_block1,inplanes_block2,num_classes)
+        #self.exit2 = EarlyExitBlockB(block, layers, shortcut_type, cardinality,sample_size,frames_sequence,inplanes_block1,inplanes_block2,num_classes)
         self.exit2_bool = opt.exit2
         self.exit1_bool = opt.exit1
+        if opt.exit1:
+            self.exit1 = EarlyExitBlockBS_LR_E1(block, layers, shortcut_type, cardinality,sample_size,frames_sequence,inplanes_block1,inplanes_block2,num_classes)
+            if opt.e1_weights:
+                dict1 = torch.load(opt.e1_weights)['state_dict']
+                new_dict={}
+                for k,v in dict1.items():
+                    if "exit1" in k:
+                        new_dict[k[13:]]=v
+                
+                self.exit1.load_state_dict(new_dict)
+                
+        if opt.exit2:
+            self.exit2 = EarlyExitBlockBS_LR_E2(block, layers, shortcut_type, cardinality,sample_size,frames_sequence,inplanes_block1,inplanes_block2,num_classes)            
+            if opt.e2_weights:
+                dict2 = torch.load(opt.e2_weights)['state_dict']
+                new_dict2={}
+                for k,v in dict2.items():
+                    if "exit2" in k:
+                        new_dict2[k[13:]]=v
+                        
+                self.exit2.load_state_dict(new_dict2)
         
-        if opt.exit1:       
-            self.exit1 = EarlyExitBlockLR_E1(block, layers, shortcut_type, cardinality,sample_size,frames_sequence,inplanes_block1,inplanes_block2,num_classes)   
-        elif opt.exit2:
-            self.exit2 = EarlyExitBlockLR_E2(block, layers, shortcut_type, cardinality,sample_size,frames_sequence,inplanes_block1,inplanes_block2,num_classes)
         for m in self.modules():
             if isinstance(m, nn.Conv3d):
                 m.weight = nn.init.kaiming_normal_(m.weight, mode='fan_out', nonlinearity='relu')
@@ -185,34 +207,57 @@ class ResNextEE(nn.Module):
 
     def forward(self, x):
         output = []
+
+        exit_count = 0
+
         x = self.conv1(x)
         x = self.bn1(x)
         x = self.relu(x)
         x = self.maxpool(x)     
         
-        ##########exit0##############
-        """
-        exit0 = self.exit0(x)
-        if (len(exit0.shape) == 1):
-            exit0 = torch.unsqueeze(exit0,0)
-        output.append(exit0)
-        """
-        #############################
-
+        
         x = self.layer1(x)##in:(1,64,8,28,28)
         if self.exit1_bool:
             exit1 = self.exit1(x)
-            output.append(exit1)
- 
+            exit1 = exit1[-1]
+            max = torch.max(F.softmax(exit1,dim=0))
+            argmax1 = torch.argmax(F.softmax(exit1,dim=0))
+            exit_count = exit_count + 1
+            if max.item() > self.th[exit_count - 1]:
+                return exit1,exit_count-1
+            
+
+            """
+            if (len(exit1.shape) == 1):
+                exit1 = torch.unsqueeze(exit1,0)
+                output.append(exit1.view(1,exit1.shape[0]))
+            else:
+                #print(exit1.shape)
+                output.append(exit1)
+            """
         #############################"""
 
         x = self.layer2(x)#in:(1,256,8,14,14)
         ##########exit2##############        
         #"""
+        
+        
         if self.exit2_bool:
             exit2 = self.exit2(x)
-            output.append(exit2)
-        #"""
+            exit2 = exit2[-1]
+            max = torch.max(F.softmax(exit2,dim=0))
+            argmax2 = torch.argmax(F.softmax(exit2,dim=0))
+            exit_count = exit_count + 1
+            
+            if max.item() > self.th[exit_count - 1]:
+                return exit2,exit_count - 1
+            """
+            if self.exit1_bool:
+                if argmax1 == argmax2 and  max.item() > (self.th[exit_count - 1]-0.1):
+                    print("it's maybe not over the th but it's consistent")
+                    return exit2,exit_count - 1
+            """
+
         #############################
         
         x = self.layer3(x)##in:(1,512,4,7,7)
@@ -222,10 +267,8 @@ class ResNextEE(nn.Module):
         x = x.view(x.size(0), -1)
         x = self.fc(x)
         
-
-        output.append(x)
-        
-        return output
+     
+        return x,exit_count 
 
 
 def get_fine_tuning_parameters(model, ft_begin_index):
